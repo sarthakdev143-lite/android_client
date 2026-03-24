@@ -3,6 +3,11 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val syncCaCert by tasks.registering(Copy::class) {
+    from(rootProject.projectDir.parentFile.resolve("ca.crt"))
+    into(projectDir.resolve("src/main/assets"))
+}
+
 android {
     namespace = "com.tlsclient.agent"
     compileSdk = 34
@@ -50,4 +55,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     // Protobuf lite for Android
     implementation("com.google.protobuf:protobuf-javalite:3.25.1")
+}
+
+tasks.named("preBuild") {
+    dependsOn(syncCaCert)
 }

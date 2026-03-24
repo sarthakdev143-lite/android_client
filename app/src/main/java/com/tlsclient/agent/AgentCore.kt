@@ -2,6 +2,7 @@ package com.tlsclient.agent
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.io.*
@@ -15,6 +16,9 @@ import java.security.KeyStore
 import java.security.cert.CertificateFactory
 
 class AgentCore(private val context: Context) {
+    companion object {
+        private const val TAG = "MushakAgent"
+    }
 
     private val clientUuid = UUID.randomUUID().toString()
     private var running = false
@@ -32,7 +36,7 @@ class AgentCore(private val context: Context) {
         val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply {
             init(ks)
         }
-        return SSLContext.getInstance("TLSv1.3").apply {
+        return SSLContext.getInstance("TLS").apply {
             init(null, tmf.trustManagers, null)
         }
     }
@@ -119,22 +123,32 @@ class AgentCore(private val context: Context) {
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
-                // silent reconnect
+                Log.w(TAG, "Connection failed to ${Config.SERVER_HOST}:${Config.SERVER_PORT}", e)
             }
             if (!running) break
+            Log.i(TAG, "Retrying in ${delay}ms")
             delay(delay)
             delay = minOf((delay * Config.MULTIPLIER).toLong(), Config.MAX_DELAY_MS)
         }
     }
 
     private fun connect() {
+        Log.i(TAG, "Connecting to ${Config.SERVER_HOST}:${Config.SERVER_PORT} as ${Config.SERVER_NAME}")
         val sslCtx = makeSslContext()
         val rawSock = Socket(Config.SERVER_HOST, Config.SERVER_PORT)
         rawSock.tcpNoDelay = true
         val sslSock = sslCtx.socketFactory.createSocket(
             rawSock, Config.SERVER_NAME, Config.SERVER_PORT, true
         ) as SSLSocket
+        val protocols = sslSock.supportedProtocols.filter { it == "TLSv1.3" || it == "TLSv1.2" }
+        if (protocols.isNotEmpty()) {
+            sslSock.enabledProtocols = protocols.toTypedArray()
+        }
+        sslSock.sslParameters = sslSock.sslParameters.apply {
+            endpointIdentificationAlgorithm = "HTTPS"
+        }
         sslSock.startHandshake()
+        Log.i(TAG, "TLS connected: ${sslSock.session.protocol} ${sslSock.session.cipherSuite}")
 
         val input  = sslSock.inputStream
         val output = sslSock.outputStream
@@ -150,6 +164,7 @@ class AgentCore(private val context: Context) {
             put("group", Config.GROUP)
         }
         sendMsg(output, makeEnv("hello", hello))
+        Log.i(TAG, "Hello sent for $clientUuid")
 
         // Message loop
         while (running) {
